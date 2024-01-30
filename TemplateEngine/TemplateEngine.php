@@ -70,7 +70,10 @@ class TemplateEngine {
     }
 
     private function parseCondition($condition) {
-        return (isset($this->data[$condition]) && $this->data[$condition]) ? 'true' : 'false';
+        $condition = preg_replace('/\b(==|!=|>=|<=)\b/', '\'$1\'', $condition);
+        $condition = preg_replace('/\b=\b/', '==', $condition);  
+        $result = eval("return $condition;");
+        return $result ? 'true' : 'false';
     }
 
     private function parseVariables($content) {
