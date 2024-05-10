@@ -5,7 +5,6 @@
 #       #     # #     # #  #    #  #       #       #     #       #    #       #   #    #   #   #  #######    #    #       #     # 
 #     # #     # #     # #   #   #  #       #     # #     # #     #    #       #    #   #    # #   #     #    #    #       #     # 
  #####  ####### ####### #    # ### #######  #####  #     #  #####     #       #     # ###    #    #     #    #    ####### ######  
-
 <?php
 
 class TemplateEngine {
@@ -37,9 +36,10 @@ class TemplateEngine {
         return ob_get_clean();
     }
 
-    public function render($template) {
+    public function render($template, $variables = []) {
         $content = file_get_contents($template);
 
+        // Process include statements
         $content = preg_replace_callback('/{{\s*include\s*\'(.*?)\'\s*}}/', function($matches) {
             $includeFile = $matches[1];
 
@@ -47,10 +47,7 @@ class TemplateEngine {
                 $includeFile = constant($includeFile);
             }
 
-            echo "Including file: $includeFile<br>";
-
-            // Construct an absolute path using __TD__
-            $includeFile = rtrim($_SERVER['DOCUMENT_ROOT'] . '/template' , '/') . '/' . $includeFile;
+            $includeFile = rtrim($_SERVER['DOCUMENT_ROOT'] . '/template', '/') . '/' . $includeFile;
 
             if (file_exists($includeFile)) {
                 return $this->includeFile($includeFile);
@@ -60,7 +57,7 @@ class TemplateEngine {
             }
         }, $content);
 
-        // Replace {{ if ... }} and {{ else }} with PHP control structures
+        // Process if statements
         $content = preg_replace_callback('/{{\s*if\s*(.*?)\s*}}(.*?)(?:{{\s*else\s*}}(.*?))?{{\s*endif\s*}}/s', function($matches) {
             $condition = $matches[1];
             $ifContent = $matches[2];
@@ -69,9 +66,57 @@ class TemplateEngine {
             return '<?php if (' . $this->parseCondition($condition) . '): ?>' . $this->parseVariables($ifContent) . '<?php else: ?>' . $this->parseVariables($elseContent) . '<?php endif; ?>';
         }, $content);
 
+        // Process if-else statements with 'and'
+        $content = preg_replace_callback('/{{\s*if\s*(.*?)\s*and\s*(.*?)\s*}}(.*?)(?:{{\s*else\s*}}(.*?))?{{\s*endif\s*}}/s', function($matches) {
+            $condition1 = $matches[1];
+            $condition2 = $matches[2];
+            $ifContent = $matches[3];
+            $elseContent = isset($matches[4]) ? $matches[4] : '';
 
+            return '<?php if (' . $this->parseCondition($condition1) . ' && ' . $this->parseCondition($condition2) . '): ?>' . $this->parseVariables($ifContent) . '<?php else: ?>' . $this->parseVariables($elseContent) . '<?php endif; ?>';
+        }, $content);
+
+        // Process debug_echo statements
+        $content = preg_replace_callback('/{{\s*debug_echo\s*(.*?)\s*}}/', function($matches) {
+            $variable = $matches[1];
+            return '<?php $this->debugEcho("' . $variable . '"); ?>';
+        }, $content);
+
+        // Process foreach loops
+        $content = preg_replace_callback('/{{\s*foreach\s*(.*?)\s*as\s*(.*?)\s*}}(.*?)(?:{{\s*endforeach\s*}})/s', function($matches) use ($variables) {
+            $variable = trim($matches[1]);
+            $loopVariable = trim($matches[2]);
+            $loopContent = trim($matches[3]);
+            
+            // Check if the variable exists in the provided variables or in the data of the TemplateEngine
+            $loopData = isset($variables[$variable]) ? $variables[$variable] : $this->getVariable($variable);
+
+            // Ensure $loopData is an array
+            if (!is_array($loopData)) {
+                return ''; // Return an empty string if $loopData is not an array
+            }
+
+            // Initialize the output string
+            $output = '';
+
+            // Iterate over each element in the loop data
+            foreach ($loopData as $loopKey => $loopValue) {
+                // Replace occurrences of the loop key and value in the loop content
+                $loopContentWithReplacements = str_replace('{{ ' . $loopVariable . ' }}', $loopValue, $loopContent);
+                
+                // Append the modified loop content to the output string
+                $output .= $loopContentWithReplacements;
+            }
+
+            // Return the final output
+            return $output;
+        }, $content);
+
+
+        // Parse variables
         $content = $this->parseVariables($content);
 
+        // Evaluate the content
         ob_start();
         eval(' ?>' . $content . '<?php ');
         return ob_get_clean();
@@ -93,7 +138,20 @@ class TemplateEngine {
         } elseif (isset($this->headerData[$variable])) {
             return $this->headerData[$variable];
         }
-        return '';
+        return $variable;
+    }
+
+    private function debugEcho($variable) {
+        if (isset($this->data[$variable])) {
+            echo $variable . ': ';
+            var_dump($this->data[$variable]);
+        } elseif (isset($this->headerData[$variable])) {
+            echo $variable . ': ';
+            var_dump($this->headerData[$variable]);
+        } else {
+            echo $variable . ': Variable not found';
+        }
     }
 }
 ?>
+
